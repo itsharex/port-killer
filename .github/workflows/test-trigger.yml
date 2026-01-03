@@ -1,0 +1,15 @@
+name: Test Trigger
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.pull_request && contains(github.event.comment.body, '/test'))
+    steps:
+      - run: echo "Triggered by ${{ github.event_name }}"
