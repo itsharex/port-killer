@@ -16,6 +16,14 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Debug job to verify workflow triggers
+  debug:
+    name: Debug Trigger
+    runs-on: ubuntu-latest
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/test-build')
+    steps:
+      - run: echo "Workflow triggered!"
+
   # Setup job: React to comment and get PR info
   setup:
     name: Setup
