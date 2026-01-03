@@ -16,14 +16,6 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Debug job to verify workflow triggers
-  debug:
-    name: Debug Trigger
-    runs-on: ubuntu-latest
-    if: github.event.issue.pull_request && contains(github.event.comment.body, '/test-build')
-    steps:
-      - run: echo "Workflow triggered!"
-
   # Setup job: React to comment and get PR info
   setup:
     name: Setup
@@ -93,15 +85,18 @@ jobs:
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
             const prNumber = process.env.PR_NUMBER;
             const dmgName = `PortKiller-pr${prNumber}-macos.dmg`;
+            const body = [
+              '## Build completed!',
+              '',
+              `**DMG:** \`${dmgName}\``,
+              `**Download:** [View artifacts](${runUrl}#artifacts)`,
+              '',
+              '_Fully signed and notarized. Artifact expires in 7 days._'
+            ].join('\n');
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: parseInt(prNumber),
-              body: `## Build completed!
-
-**DMG:** \`${dmgName}\`
-**Download:** [View artifacts](${runUrl}#artifacts)
-
-_Fully signed and notarized. Artifact expires in 7 days._`
+              body: body
             });
