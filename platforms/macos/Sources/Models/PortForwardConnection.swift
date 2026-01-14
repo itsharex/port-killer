@@ -130,12 +130,15 @@ final class PortForwardConnectionState: Identifiable, Hashable {
     /// Tracks if the connection was stopped intentionally by the user (vs unexpected disconnect)
     var isIntentionallyStopped: Bool = false
 
+    /// Maximum log entries to keep per connection (memory optimization)
+    private static let maxLogEntries = 100
+
     func appendLog(_ message: String, type: PortForwardProcessType, isError: Bool = false) {
         let entry = PortForwardLogEntry(timestamp: Date(), message: message, type: type, isError: isError)
         logs.append(entry)
-        // Keep only last 500 log entries
-        if logs.count > 500 {
-            logs.removeFirst(logs.count - 500)
+        // Keep only last N log entries to prevent memory accumulation
+        if logs.count > Self.maxLogEntries {
+            logs.removeFirst(logs.count - Self.maxLogEntries)
         }
     }
 

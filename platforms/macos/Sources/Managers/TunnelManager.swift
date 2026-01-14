@@ -101,10 +101,11 @@ final class TunnelManager {
         Task { [weak self, weak tunnelState] in
             guard let self = self, let tunnelState = tunnelState else { return }
 
-            // Set URL handler
+            // Set URL handler with proper weak capture in inner Task
             let urlHandler: @Sendable (String) -> Void = { [weak self, weak tunnelState] url in
                 guard let tunnelState = tunnelState else { return }
-                Task { @MainActor in
+                Task { @MainActor [weak self, weak tunnelState] in
+                    guard let tunnelState = tunnelState else { return }
                     tunnelState.tunnelURL = url
                     tunnelState.status = .active
                     tunnelState.startTime = Date()
@@ -117,10 +118,11 @@ final class TunnelManager {
             }
             await self.cloudflaredService.setURLHandler(for: tunnelState.id, handler: urlHandler)
 
-            // Set error handler
+            // Set error handler with proper weak capture in inner Task
             let errorHandler: @Sendable (String) -> Void = { [weak tunnelState] error in
                 guard let tunnelState = tunnelState else { return }
-                Task { @MainActor in
+                Task { @MainActor [weak tunnelState] in
+                    guard let tunnelState = tunnelState else { return }
                     tunnelState.lastError = error
                     if tunnelState.status != .active {
                         tunnelState.status = .error

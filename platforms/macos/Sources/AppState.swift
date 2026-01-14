@@ -77,8 +77,51 @@ final class AppState {
         return portForwardManager.connections.first { $0.id == id }
     }
 
+    // MARK: - Cached Filtered Ports (Memory Optimization)
+
+    /// Cache for filtered ports to avoid repeated allocations
+    @ObservationIgnored private var _cachedFilteredPorts: [PortInfo] = []
+    @ObservationIgnored private var _filterCacheKey: FilterCacheKey?
+
+    /// Cache key to detect when recalculation is needed
+    private struct FilterCacheKey: Equatable {
+        let portsCount: Int
+        let portsHash: Int
+        let sidebarItem: SidebarItem
+        let filterActive: Bool
+        let filterText: String
+        let hideSystem: Bool
+        let favoritesCount: Int
+        let watchedCount: Int
+    }
+
     /// Returns filtered ports based on sidebar selection and active filters.
+    /// Uses caching to avoid repeated array allocations on each access.
     var filteredPorts: [PortInfo] {
+        let currentKey = FilterCacheKey(
+            portsCount: ports.count,
+            portsHash: ports.isEmpty ? 0 : ports[0].hashValue ^ ports.count,
+            sidebarItem: selectedSidebarItem,
+            filterActive: filter.isActive,
+            filterText: filter.searchText,
+            hideSystem: Defaults[.hideSystemProcesses],
+            favoritesCount: favorites.count,
+            watchedCount: watchedPorts.count
+        )
+
+        // Return cached value if nothing changed
+        if currentKey == _filterCacheKey {
+            return _cachedFilteredPorts
+        }
+
+        // Recompute and cache
+        _cachedFilteredPorts = computeFilteredPorts()
+        _filterCacheKey = currentKey
+        return _cachedFilteredPorts
+    }
+
+    /// Computes filtered ports (called only when cache is invalidated)
+    private func computeFilteredPorts() -> [PortInfo] {
         if case .settings = selectedSidebarItem { return [] }
 
         var result: [PortInfo]

@@ -145,19 +145,21 @@ final class PortForwardManager {
         state.portForwardTask = Task { [weak self, weak state] in
             guard let self = self, let state = state else { return }
 
-            // Set log handler with proper weak capture
+            // Set log handler with proper weak capture (including inner Task)
             let logHandler: LogHandler = { [weak state] message, type, isError in
                 guard let state = state else { return }
-                Task { @MainActor in
+                Task { @MainActor [weak state] in
+                    guard let state = state else { return }
                     state.appendLog(message, type: type, isError: isError)
                 }
             }
             await self.processManager.setLogHandler(for: id, handler: logHandler)
 
-            // Set port conflict handler with proper weak capture
+            // Set port conflict handler with proper weak capture (including inner Task)
             let conflictHandler: PortConflictHandler = { [weak self, weak state] port in
                 guard let self = self, let state = state else { return }
-                Task { @MainActor in
+                Task { @MainActor [weak self, weak state] in
+                    guard let self = self, let state = state else { return }
                     state.appendLog("Port \(port) in use, auto-recovering...", type: .portForward, isError: false)
 
                     await self.processManager.killProcessOnPort(port)
@@ -187,6 +189,9 @@ final class PortForwardManager {
         state.portForwardTask?.cancel()
         state.portForwardTask = nil
         state.portForwardStatus = .disconnected
+
+        // Clear logs to free memory when connection is stopped
+        state.clearLogs()
 
         Task {
             await processManager.killProcesses(for: id)
