@@ -53,11 +53,11 @@ struct PortDetailView: View {
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(typeColor.opacity(0.2))
+                        .fill(port.processType.color.opacity(0.2))
                         .frame(width: 48, height: 48)
                     Image(systemName: port.processType.icon)
                         .font(.title2)
-                        .foregroundStyle(typeColor)
+                        .foregroundStyle(port.processType.color)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -79,8 +79,8 @@ struct PortDetailView: View {
                     .font(.caption)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(typeColor.opacity(0.2))
-                    .foregroundStyle(typeColor)
+                    .background(port.processType.color.opacity(0.2))
+                    .foregroundStyle(port.processType.color)
                     .clipShape(Capsule())
 
                 if appState.isFavorite(port.port) {
@@ -164,23 +164,7 @@ struct PortDetailView: View {
                 .font(.headline)
 
             VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    Button {
-                        appState.toggleFavorite(port.port)
-                    } label: {
-                        Text(appState.isFavorite(port.port) ? "Remove Favorite" : "Add Favorite")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button {
-                        appState.toggleWatch(port.port)
-                    } label: {
-                        Text(appState.isWatching(port.port) ? "Stop Watching" : "Watch")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                }
+                FavoriteWatchButtons(portNumber: port.port, style: .labeled)
 
                 // Tunnel section
                 if port.isActive {
@@ -225,16 +209,6 @@ struct PortDetailView: View {
             }
             .buttonStyle(.bordered)
             .help("Create a public URL for this port via Cloudflare Tunnel")
-        }
-    }
-
-    private var typeColor: Color {
-        switch port.processType {
-        case .webServer: return .blue
-        case .database: return .purple
-        case .development: return .orange
-        case .system: return .gray
-        case .other: return .secondary
         }
     }
 }

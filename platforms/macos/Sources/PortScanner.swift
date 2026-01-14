@@ -15,7 +15,7 @@ import Foundation
  * Thread Safety:
  * This is an actor, so all methods are isolated and can be called safely from any context.
  */
-actor PortScanner {
+actor PortScanner: PortScannerProtocol {
 
     /**
      * Scans all listening TCP ports using lsof.

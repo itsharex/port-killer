@@ -16,7 +16,7 @@ import SwiftUI
 /// including permission requests, notification delivery, and delegate handling.
 /// It ensures notifications only run when the app is built as a .app bundle.
 @MainActor
-final class NotificationService: NSObject {
+final class NotificationService: NSObject, NotificationServiceProtocol {
     /// Singleton instance
     static let shared = NotificationService()
 

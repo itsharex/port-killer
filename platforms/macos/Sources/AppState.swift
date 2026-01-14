@@ -35,6 +35,14 @@ extension KeyboardShortcuts.Name {
 @Observable
 @MainActor
 final class AppState {
+    // MARK: - Decomposed State Objects
+
+    /// Manages favorite ports (extracted state)
+    let favoritesState: FavoritesState
+
+    /// Manages watched ports (extracted state)
+    let watchedPortsState: WatchedPortsState
+
     // MARK: - Port State
 
     /// All currently scanned ports
@@ -114,30 +122,24 @@ final class AppState {
         return result
     }
 
-    // MARK: - Favorites
+    // MARK: - Backward Compatibility Accessors
 
-    /// Cached favorites set, synced with UserDefaults
-    private var _favorites: Set<Int> = Defaults[.favorites] {
-        didSet { Defaults[.favorites] = _favorites }
-    }
-
-    /// Port numbers marked as favorites by the user
+    /// Port numbers marked as favorites by the user (delegates to FavoritesState)
     var favorites: Set<Int> {
-        get { _favorites }
-        set { _favorites = newValue }
+        get { favoritesState.favorites }
+        set { favoritesState.favorites = newValue }
     }
 
-    // MARK: - Watched Ports
-
-    /// Cached watched ports array, synced with UserDefaults
-    private var _watchedPorts: [WatchedPort] = Defaults[.watchedPorts] {
-        didSet { Defaults[.watchedPorts] = _watchedPorts }
-    }
-
-    /// Ports being watched for state changes
+    /// Ports being watched for state changes (delegates to WatchedPortsState)
     var watchedPorts: [WatchedPort] {
-        get { _watchedPorts }
-        set { _watchedPorts = newValue }
+        get { watchedPortsState.watchedPorts }
+        set { watchedPortsState.watchedPorts = newValue }
+    }
+
+    /// Tracks previous port states for watch notifications (delegates to WatchedPortsState)
+    var previousPortStates: [Int: Bool] {
+        get { watchedPortsState.previousPortStates }
+        set { watchedPortsState.previousPortStates = newValue }
     }
 
     // MARK: - Managers
@@ -154,17 +156,22 @@ final class AppState {
     // MARK: - Internal Properties (for extensions)
 
     /// Port scanning actor
-    let scanner = PortScanner()
+    let scanner: PortScannerProtocol
 
     /// Background task for auto-refresh
     @ObservationIgnored var refreshTask: Task<Void, Never>?
 
-    /// Tracks previous port states for watch notifications
-    var previousPortStates: [Int: Bool] = [:]
-
     // MARK: - Initialization
 
-    init() {
+    init(
+        scanner: PortScannerProtocol = PortScanner(),
+        favoritesState: FavoritesState? = nil,
+        watchedPortsState: WatchedPortsState? = nil
+    ) {
+        self.scanner = scanner
+        self.favoritesState = favoritesState ?? FavoritesState()
+        self.watchedPortsState = watchedPortsState ?? WatchedPortsState()
+
         setupKeyboardShortcuts()
         startAutoRefresh()
     }

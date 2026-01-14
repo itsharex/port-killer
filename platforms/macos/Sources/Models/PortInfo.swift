@@ -41,13 +41,11 @@ struct PortInfo: Identifiable, Hashable, Sendable {
     /// Whether this port is currently active/listening
     let isActive: Bool
 
+    /// Detected process type (cached at construction time for performance)
+    let processType: ProcessType
+
     /// Formatted port number for display (e.g., ":3000")
     var displayPort: String { ":\(port)" }
-
-    /// Detected process type based on the process name
-    var processType: ProcessType {
-        ProcessType.detect(from: processName)
-    }
 
     /// Create an inactive placeholder for a favorited/watched port
     ///
@@ -62,7 +60,8 @@ struct PortInfo: Identifiable, Hashable, Sendable {
             user: "-",
             command: "",
             fd: "",
-            isActive: false
+            isActive: false,
+            processType: .other
         )
     }
 
@@ -86,7 +85,8 @@ struct PortInfo: Identifiable, Hashable, Sendable {
             user: user,
             command: command,
             fd: fd,
-            isActive: true
+            isActive: true,
+            processType: ProcessType.detect(from: processName)
         )
     }
 }

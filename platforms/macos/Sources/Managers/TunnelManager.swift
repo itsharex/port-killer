@@ -4,31 +4,48 @@ import AppKit
 // MARK: - Tunnel Manager
 
 /// Manages Cloudflare Quick Tunnel connections
+/// Coordinates between TunnelState (UI) and CloudflaredService (process management)
 @Observable
 @MainActor
 final class TunnelManager {
-    /// Active tunnel states
-    var tunnels: [CloudflareTunnelState] = []
+    /// Observable state for UI (extracted)
+    let state: TunnelState
 
     /// The cloudflared service actor
-    let cloudflaredService = CloudflaredService()
+    let cloudflaredService: CloudflaredService
+
+    /// Task for cleaning up orphaned tunnels from previous sessions
+    @ObservationIgnored private var cleanupTask: Task<Void, Never>?
+
+    // MARK: - Backward Compatibility Accessors
+
+    /// Active tunnel states (delegates to state)
+    var tunnels: [CloudflareTunnelState] {
+        get { state.tunnels }
+        set { state.tunnels = newValue }
+    }
 
     /// Number of currently active tunnels
     var activeTunnelCount: Int {
-        tunnels.filter { $0.status == .active }.count
+        state.activeTunnelCount
     }
 
-    /// Cached installation status (observable for UI updates)
-    private(set) var isCloudflaredInstalled: Bool = false
-
-    /// Task for cleaning up orphaned tunnels from previous sessions
-    private var cleanupTask: Task<Void, Never>?
+    /// Cached installation status
+    var isCloudflaredInstalled: Bool {
+        state.isCloudflaredInstalled
+    }
 
     // MARK: - Initialization
 
-    init() {
+    init(
+        state: TunnelState = TunnelState(),
+        cloudflaredService: CloudflaredService = CloudflaredService()
+    ) {
+        self.state = state
+        self.cloudflaredService = cloudflaredService
+
         // Check initial installation status
-        isCloudflaredInstalled = cloudflaredService.isInstalled
+        state.setInstalled(cloudflaredService.isInstalled)
 
         // Clean up any orphaned tunnel processes from previous crashed sessions
         cleanupTask = Task {
@@ -38,7 +55,7 @@ final class TunnelManager {
 
     /// Re-check cloudflared installation status (call after user installs)
     func recheckInstallation() {
-        isCloudflaredInstalled = cloudflaredService.isInstalled
+        state.setInstalled(cloudflaredService.isInstalled)
     }
 
     /// Kill any stray cloudflared tunnel processes from previous sessions
@@ -60,11 +77,7 @@ final class TunnelManager {
     // MARK: - Tunnel Operations
 
     /// Start a tunnel for the specified port
-    /// - Parameters:
-    ///   - port: The local port to expose
-    ///   - portInfoId: Optional reference to the PortInfo this tunnel is for
     func startTunnel(for port: Int, portInfoId: UUID? = nil) {
-        // Ensure cleanup has completed before starting new tunnels
         Task {
             await cleanupTask?.value
             await _startTunnelImpl(for: port, portInfoId: portInfoId)
@@ -74,70 +87,62 @@ final class TunnelManager {
     /// Internal implementation of startTunnel after cleanup is complete
     private func _startTunnelImpl(for port: Int, portInfoId: UUID? = nil) async {
         // Check if tunnel already exists for this port
-        if let existing = tunnels.first(where: { $0.port == port && $0.status != .error }) {
-            // Already tunneling this port - just copy the URL if available
+        if let existing = state.tunnel(for: port), existing.status != .error {
             if let url = existing.tunnelURL {
                 ClipboardService.copy(url)
             }
             return
         }
 
-        let state = CloudflareTunnelState(port: port, portInfoId: portInfoId)
-        tunnels.append(state)
+        let tunnelState = CloudflareTunnelState(port: port, portInfoId: portInfoId)
+        state.addTunnel(tunnelState)
+        tunnelState.status = .starting
 
-        state.status = .starting
+        Task { [weak self, weak tunnelState] in
+            guard let self = self, let tunnelState = tunnelState else { return }
 
-        Task { [weak self, weak state] in
-            guard let self = self, let state = state else { return }
-
-            // Set URL handler with proper weak capture
-            let urlHandler: @Sendable (String) -> Void = { [weak self, weak state] url in
-                guard let state = state else { return }
+            // Set URL handler
+            let urlHandler: @Sendable (String) -> Void = { [weak self, weak tunnelState] url in
+                guard let tunnelState = tunnelState else { return }
                 Task { @MainActor in
-                    state.tunnelURL = url
-                    state.status = .active
-                    state.startTime = Date()
-
-                    // Auto-copy URL to clipboard
+                    tunnelState.tunnelURL = url
+                    tunnelState.status = .active
+                    tunnelState.startTime = Date()
                     ClipboardService.copy(url)
-
-                    // Send notification
                     NotificationService.shared.notify(
                         title: "Tunnel Active",
-                        body: "Port \(state.port) available at \(self?.shortenedURL(url) ?? url)"
+                        body: "Port \(tunnelState.port) available at \(self?.shortenedURL(url) ?? url)"
                     )
                 }
             }
-            await self.cloudflaredService.setURLHandler(for: state.id, handler: urlHandler)
+            await self.cloudflaredService.setURLHandler(for: tunnelState.id, handler: urlHandler)
 
-            // Set error handler with proper weak capture
-            let errorHandler: @Sendable (String) -> Void = { [weak state] error in
-                guard let state = state else { return }
+            // Set error handler
+            let errorHandler: @Sendable (String) -> Void = { [weak tunnelState] error in
+                guard let tunnelState = tunnelState else { return }
                 Task { @MainActor in
-                    state.lastError = error
-                    if state.status != .active {
-                        state.status = .error
+                    tunnelState.lastError = error
+                    if tunnelState.status != .active {
+                        tunnelState.status = .error
                     }
                 }
             }
-            await self.cloudflaredService.setErrorHandler(for: state.id, handler: errorHandler)
+            await self.cloudflaredService.setErrorHandler(for: tunnelState.id, handler: errorHandler)
 
             do {
-                let process = try await self.cloudflaredService.startTunnel(id: state.id, port: port)
-
-                // Wait a bit to see if process starts successfully
+                let process = try await self.cloudflaredService.startTunnel(id: tunnelState.id, port: port)
                 try? await Task.sleep(for: .seconds(3))
 
-                if !process.isRunning && state.status != .active {
+                if !process.isRunning && tunnelState.status != .active {
                     await MainActor.run {
-                        state.status = .error
-                        state.lastError = "Process terminated unexpectedly"
+                        tunnelState.status = .error
+                        tunnelState.lastError = "Process terminated unexpectedly"
                     }
                 }
             } catch {
                 await MainActor.run {
-                    state.status = .error
-                    state.lastError = error.localizedDescription
+                    tunnelState.status = .error
+                    tunnelState.lastError = error.localizedDescription
                 }
             }
         }
@@ -145,23 +150,19 @@ final class TunnelManager {
 
     /// Stop the tunnel for the specified port
     func stopTunnel(for port: Int) {
-        guard let state = tunnels.first(where: { $0.port == port }) else { return }
-        stopTunnel(id: state.id)
+        guard let tunnel = state.tunnel(for: port) else { return }
+        stopTunnel(id: tunnel.id)
     }
 
     /// Stop a tunnel by its ID
     func stopTunnel(id: UUID) {
-        guard let index = tunnels.firstIndex(where: { $0.id == id }) else { return }
-        let state = tunnels[index]
-
-        state.status = .stopping
+        guard let tunnel = tunnels.first(where: { $0.id == id }) else { return }
+        tunnel.status = .stopping
 
         Task {
             await cloudflaredService.stopTunnel(id: id)
             await MainActor.run {
-                if let idx = tunnels.firstIndex(where: { $0.id == id }) {
-                    tunnels.remove(at: idx)
-                }
+                state.removeTunnel(id: id)
             }
         }
     }
@@ -172,29 +173,29 @@ final class TunnelManager {
             tunnel.status = .stopping
         }
         await cloudflaredService.stopAllTunnels()
-        tunnels.removeAll()
+        state.removeAllTunnels()
     }
 
     /// Get the tunnel state for a port
     func tunnelState(for port: Int) -> CloudflareTunnelState? {
-        tunnels.first { $0.port == port }
+        state.tunnel(for: port)
     }
 
     /// Check if a port has an active tunnel
     func hasTunnel(for port: Int) -> Bool {
-        tunnels.contains { $0.port == port && $0.status != .error }
+        state.hasTunnel(for: port)
     }
 
     /// Copy the tunnel URL for a port to clipboard
     func copyURL(for port: Int) {
-        guard let tunnel = tunnelState(for: port),
+        guard let tunnel = state.tunnel(for: port),
               let url = tunnel.tunnelURL else { return }
         ClipboardService.copy(url)
     }
 
     /// Open the tunnel URL in browser
     func openURL(for port: Int) {
-        guard let tunnel = tunnelState(for: port),
+        guard let tunnel = state.tunnel(for: port),
               let urlString = tunnel.tunnelURL,
               let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
@@ -202,7 +203,6 @@ final class TunnelManager {
 
     // MARK: - Helpers
 
-    /// Shorten a trycloudflare.com URL for display
     private func shortenedURL(_ url: String) -> String {
         url.replacingOccurrences(of: "https://", with: "")
     }

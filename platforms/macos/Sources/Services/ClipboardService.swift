@@ -1,7 +1,7 @@
 import AppKit
 
 /// Utility service for clipboard operations
-enum ClipboardService {
+enum ClipboardService: ClipboardServiceProtocol {
     /// Copy text to clipboard
     static func copy(_ text: String) {
         let pasteboard = NSPasteboard.general
